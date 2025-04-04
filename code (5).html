@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sequential Random Image Viewer</title>
+    <style>
+        /* Basic Reset & Body Styling */
+        *, *::before, *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        html, body {
+            height: 100%;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+            background-color: #f0f2f5;
+            color: #333;
+            overflow: hidden; /* Prevent scrollbars on body */
+        }
+
+        /* Main Layout */
+        .container {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+
+        /* Controls Area */
+        .controls {
+            padding: 15px;
+            background-color: #ffffff;
+            border-bottom: 1px solid #d9d9d9;
+            display: flex;
+            flex-wrap: wrap; /* Allow wrapping on smaller screens */
+            align-items: center;
+            gap: 15px; /* Spacing between control elements */
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            z-index: 10; /* Keep controls above image */
+        }
+
+        .control-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .controls label {
+            font-weight: 500;
+            white-space: nowrap; /* Prevent label text wrapping */
+        }
+
+        .controls input[type="file"],
+        .controls input[type="number"],
+        .controls button {
+            padding: 8px 12px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+
+        .controls input[type="file"] {
+            max-width: 200px; /* Limit file input width */
+        }
+
+        .controls input[type="number"] {
+            width: 70px;
+        }
+
+        .controls button {
+            background-color: #007bff;
+            color: white;
+            cursor: pointer;
+            transition: background-color 0.2s ease;
+            border: none;
+        }
+
+        .controls button:hover:not(:disabled) {
+            background-color: #0056b3;
+        }
+
+        .controls button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+            opacity: 0.7;
+        }
+
+        /* Navigation Buttons Specific Styling */
+        #prevBtn, #nextBtn {
+             min-width: 40px; /* Ensure consistent width */
+             text-align: center;
+        }
+
+        /* Image Display Area */
+        .image-container {
+            flex-grow: 1; /* Takes remaining vertical space */
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            overflow: hidden; /* Hide overflow if image is larger */
+            background-color: #e9ecef; /* Slightly different background */
+            position: relative; /* Needed for potential overlays or absolute positioning */
+        }
+
+        .image-container img {
+            display: block;
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain; /* Scale image while preserving aspect ratio */
+            background-color: #ffffff; /* White background behind transparent images */
+            box-shadow: 0 4px 15px rgba(0,0,0,0.15);
+            opacity: 0; /* Start hidden for fade-in */
+            transition: opacity 0.5s ease-in-out; /* Fade transition */
+        }
+
+        .image-container img.loaded {
+             opacity: 1;
+        }
+
+        /* Status Info */
+        .status-info {
+            font-size: 12px;
+            color: #555;
+            margin-left: auto; /* Pushes status info to the right */
+             padding-right: 10px;
+        }
+
+        /* Fullscreen Specific Styles */
+        /* Style the container when it is in fullscreen */
+        .image-container:fullscreen {
+            background-color: #000; /* Black background in fullscreen */
+            padding: 0; /* Remove padding */
+        }
+        .image-container:fullscreen img {
+            box-shadow: none; /* Remove shadow in fullscreen */
+             background-color: transparent;
+        }
+
+        /* Hide controls when image container is fullscreen */
+        body:has(.image-container:fullscreen) .controls {
+            display: none;
+        }
+         body:has(.image-container:fullscreen) .image-container {
+            height: 100vh; /* Ensure full height when controls are hidden */
+        }
+
+
+        /* Responsive Adjustments */
+        @media (max-width: 768px) {
+            .controls {
+                gap: 10px;
+                padding: 10px;
+            }
+            .control-group {
+                width: 100%; /* Stack groups vertically */
+                justify-content: space-between; /* Space out label and input */
+            }
+             .control-group:first-child { /* File input group */
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            .controls input[type="file"] {
+                 max-width: 100%;
+             }
+
+            .controls label {
+                margin-bottom: 4px; /* Add space below label when stacked */
+            }
+             .status-info {
+                 width: 100%;
+                 text-align: center;
+                 margin-left: 0;
+                 margin-top: 5px;
+                 padding-right: 0;
+             }
+             /* Ensure nav/play buttons stay together */
+             .nav-play-group {
+                 display: flex;
+                 justify-content: space-around;
+                 width: 100%;
+                 margin-top: 5px;
+             }
+
+        }
+         @media (max-width: 480px) {
+              .controls button, .controls input[type="number"] {
+                  padding: 6px 10px;
+                  font-size: 13px;
+              }
+              #delayInput {
+                  width: 60px;
+              }
+              .controls {
+                gap: 8px;
+            }
+         }
+
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <div class="controls">
+            <div class="control-group">
+                <label for="fileInput">Select Images:</label>
+                <input type="file" id="fileInput" multiple accept="image/*">
+            </div>
+
+             <div class="control-group">
+                <label for="delayInput">Delay (s):</label>
+                <input type="number" id="delayInput" value="5" min="1">
+             </div>
+
+            <!-- Group for nav/play buttons for better responsive layout -->
+            <div class="nav-play-group control-group">
+                 <button id="prevBtn" title="Previous Image" disabled>&lt;</button>
+                <button id="playPauseBtn" title="Start Slideshow" disabled>▶ Play</button>
+                <button id="nextBtn" title="Next Image" disabled>&gt;</button>
+                <button id="fullscreenBtn" title="Toggle Fullscreen" disabled>⛶</button>
+            </div>
+
+            <div class="status-info" id="statusInfo">No images loaded</div>
+        </div>
+
+        <div class="image-container" id="imageContainer">
+            <img id="currentImage" src="" alt="Selected image will appear here">
+        </div>
+    </div>
+
+    <script>
+        // DOM Elements
+        const fileInput = document.getElementById('fileInput');
+        const delayInput = document.getElementById('delayInput');
+        const prevBtn = document.getElementById('prevBtn');
+        const nextBtn = document.getElementById('nextBtn');
+        const playPauseBtn = document.getElementById('playPauseBtn');
+        const fullscreenBtn = document.getElementById('fullscreenBtn');
+        const imageContainer = document.getElementById('imageContainer');
+        const currentImage = document.getElementById('currentImage');
+        const statusInfo = document.getElementById('statusInfo');
+
+        // State Variables
+        let imageFiles = []; // Array to hold the File objects
+        let currentIndex = -1; // Index of the currently displayed image in the ORIGINAL order
+        let slideshowInterval = null; // Stores the interval ID for the slideshow
+        let isPlaying = false; // Tracks if the slideshow is active
+        let currentObjectURL = null; // Stores the current Object URL for revocation
+
+        // Slideshow specific state
+        let slideshowOrder = []; // Array to hold shuffled indices for the current cycle
+        let slideshowPosition = -1; // Current position within the slideshowOrder array
+
+        // --- Event Listeners ---
+
+        fileInput.addEventListener('change', handleFileSelection);
+        delayInput.addEventListener('input', handleDelayChange);
+        playPauseBtn.addEventListener('click', toggleSlideshow);
+        prevBtn.addEventListener('click', showPreviousImage);
+        nextBtn.addEventListener('click', showNextImage);
+        fullscreenBtn.addEventListener('click', toggleFullscreen);
+        currentImage.addEventListener('load', () => {
+             currentImage.classList.add('loaded'); // Add class for fade-in effect
+             // Revoke the *previous* URL after the new image is successfully loaded
+             if (currentObjectURL) {
+                URL.revokeObjectURL(currentObjectURL);
+             }
+             currentObjectURL = currentImage.src; // Store the new URL
+        });
+        currentImage.addEventListener('error', () => {
+            console.error("Error loading image:", imageFiles[currentIndex]?.name);
+             statusInfo.textContent = `Error loading: ${imageFiles[currentIndex]?.name || 'image'}`;
+            currentImage.alt = "Error loading image";
+            currentImage.src = ""; // Clear broken image source
+             currentImage.classList.remove('loaded');
+            // If playing, move to the next image in the sequence or stop
+            if (isPlaying) {
+                // Decide: skip or stop? Let's skip to the next in the shuffled order.
+                playNextInShuffledOrder();
+            }
+        });
+
+
+        // --- Functions ---
+
+        /**
+         * Shuffles array in place using Fisher-Yates (Knuth) algorithm.
+         * @param {Array} array Array to shuffle.
+         */
+        function shuffleArray(array) {
+            for (let i = array.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [array[i], array[j]] = [array[j], array[i]]; // Swap elements
+            }
+        }
+
+
+        function handleFileSelection(event) {
+            stopSlideshow(); // Stop any running slideshow
+             imageFiles = Array.from(event.target.files).filter(file => file.type.startsWith('image/'));
+            currentIndex = -1; // Reset index
+             slideshowOrder = []; // Reset shuffled order
+             slideshowPosition = -1; // Reset shuffle position
+
+             if (currentObjectURL) {
+                 URL.revokeObjectURL(currentObjectURL); // Revoke URL from previous selection
+                 currentObjectURL = null;
+             }
+             currentImage.src = ""; // Clear previous image
+             currentImage.alt = "Select images to view";
+             currentImage.classList.remove('loaded');
+
+
+            if (imageFiles.length > 0) {
+                // Don't display immediately, let user press Play or Next
+                // Or display the first one? Let's display the first one.
+                currentIndex = 0;
+                displayImage(currentIndex);
+                updateControlsState();
+            } else {
+                 statusInfo.textContent = "No images loaded";
+                updateControlsState(); // Disable buttons if no valid images
+            }
+        }
+
+        function handleDelayChange() {
+             // If slideshow is playing, restart it with the new delay
+            if (isPlaying) {
+                stopSlideshow(); // Clear existing interval
+                startSlideshow(); // Start with new delay and reshuffle
+            }
+        }
+
+        function displayImage(index) {
+            if (index < 0 || index >= imageFiles.length) {
+                 console.warn("Attempted to display invalid index:", index);
+                 // Don't change the display if index is invalid
+                return;
+            }
+
+             // Update the main current index tracking
+             currentIndex = index;
+
+             // Remove loaded class immediately before setting new src
+             currentImage.classList.remove('loaded');
+
+             const file = imageFiles[index];
+             if (!file) {
+                 console.error("File not found at index:", index);
+                  statusInfo.textContent = `Error: File missing at index ${index}`;
+                 return;
+             }
+
+             const objectURL = URL.createObjectURL(file);
+
+             // Set alt text for accessibility and info
+             currentImage.alt = file.name;
+             // Set the src. The 'load' event listener will handle adding the 'loaded' class and revoking the previous URL.
+             currentImage.src = objectURL;
+
+             // Update status
+             statusInfo.textContent = `Image ${index + 1} of ${imageFiles.length} (${file.name})`;
+             updateControlsState(); // Update button enable/disable states
+        }
+
+        function showNextImage() {
+            if (imageFiles.length === 0) return;
+            stopSlideshow(); // Manual navigation stops the slideshow
+            const nextIndex = (currentIndex + 1) % imageFiles.length; // Wrap around
+            displayImage(nextIndex);
+        }
+
+        function showPreviousImage() {
+            if (imageFiles.length === 0) return;
+            stopSlideshow(); // Manual navigation stops the slideshow
+            const prevIndex = (currentIndex - 1 + imageFiles.length) % imageFiles.length; // Wrap around correctly
+            displayImage(prevIndex);
+        }
+
+         // Renamed from showNextRandomImage
+         function playNextInShuffledOrder() {
+             if (!isPlaying || imageFiles.length === 0) {
+                 stopSlideshow();
+                 return;
+             }
+
+             slideshowPosition++; // Move to the next position in the shuffled list
+
+             // Check if we've reached the end of the shuffled list
+             if (slideshowPosition >= slideshowOrder.length) {
+                 if (imageFiles.length <= 1) {
+                     // Only one image, just keep showing it (or stop if preferred)
+                     // Let's just ensure it's displayed if src is somehow lost
+                     if (currentIndex !== 0 || !currentImage.src) {
+                        displayImage(0);
+                     }
+                     slideshowPosition = 0; // Reset position for single image case
+                     // No reshuffle needed for single image
+                 } else {
+                    // Reshuffle needed for multiple images
+                    console.log("Reshuffling images for next cycle.");
+                    // Create a new shuffled order
+                    slideshowOrder = Array.from(imageFiles.keys()); // Get indices [0, 1, ..., n-1]
+                    shuffleArray(slideshowOrder);
+                     // Avoid showing the last image of the previous cycle as the first of the new one
+                     if (slideshowOrder.length > 1 && slideshowOrder[0] === currentIndex) {
+                         // Simple swap with the next element if possible
+                         if (slideshowOrder.length > 1) {
+                            [slideshowOrder[0], slideshowOrder[1]] = [slideshowOrder[1], slideshowOrder[0]];
+                         }
+                        console.log("Avoiding immediate repeat after reshuffle.");
+                     }
+                    slideshowPosition = 0; // Reset position to the start of the new shuffled list
+                 }
+             }
+
+             // Get the actual image index from the shuffled list
+             const imageIndexToShow = slideshowOrder[slideshowPosition];
+             displayImage(imageIndexToShow); // Display the image (this also updates currentIndex)
+         }
+
+
+        function toggleSlideshow() {
+             if (imageFiles.length === 0) return; // Don't allow play if no images
+
+            if (isPlaying) {
+                stopSlideshow();
+            } else {
+                startSlideshow();
+            }
+        }
+
+        function startSlideshow() {
+            if (isPlaying || imageFiles.length === 0) return; // Prevent multiple intervals or starting without images
+
+            isPlaying = true;
+            playPauseBtn.textContent = '❚❚ Pause'; // Pause symbol
+            playPauseBtn.title = 'Pause Slideshow';
+
+            // --- Setup Shuffled Order ---
+            // If slideshowOrder is empty or we always want a fresh shuffle on Play:
+            if (slideshowOrder.length !== imageFiles.length) { // Re-shuffle if file list changed or first play
+                slideshowOrder = Array.from(imageFiles.keys()); // Get indices [0, 1, ..., n-1]
+                shuffleArray(slideshowOrder);
+                slideshowPosition = -1; // Start from the beginning of the shuffle
+                 console.log("Initial shuffle:", slideshowOrder);
+            } else {
+                // Optional: Could resume from slideshowPosition, but starting fresh is often clearer.
+                // Let's stick with starting fresh shuffle for simplicity upon hitting play.
+                 slideshowOrder = Array.from(imageFiles.keys());
+                 shuffleArray(slideshowOrder);
+                 // Ensure the first image shown isn't the one currently displayed (if > 1 image)
+                 if (slideshowOrder.length > 1 && slideshowOrder[0] === currentIndex) {
+                     // Swap first and second element to avoid immediate repeat
+                     [slideshowOrder[0], slideshowOrder[1]] = [slideshowOrder[1], slideshowOrder[0]];
+                     console.log("Avoiding immediate repeat on Play.");
+                 }
+                 slideshowPosition = -1; // Reset position
+                 console.log("Reshuffled on Play:", slideshowOrder);
+            }
+             //--- End Setup ---
+
+            const delaySeconds = parseInt(delayInput.value, 10) || 5;
+            const delayMilliseconds = Math.max(1000, delaySeconds * 1000); // Ensure minimum 1 second delay
+
+             // Call immediately to show the first image in the shuffled sequence, then set interval
+             playNextInShuffledOrder();
+             slideshowInterval = setInterval(playNextInShuffledOrder, delayMilliseconds);
+             updateControlsState();
+        }
+
+        function stopSlideshow() {
+            if (!slideshowInterval && !isPlaying) return; // Already stopped
+
+            clearInterval(slideshowInterval);
+            slideshowInterval = null;
+            isPlaying = false;
+            // We keep slideshowOrder and slideshowPosition as they are.
+            // Pressing Play again will trigger a reshuffle in startSlideshow.
+            playPauseBtn.textContent = '▶ Play'; // Play symbol
+            playPauseBtn.title = 'Start Slideshow';
+             updateControlsState();
+        }
+
+        function toggleFullscreen() {
+             if (!document.fullscreenElement) {
+                 imageContainer.requestFullscreen()
+                     .catch(err => {
+                         console.error(`Error attempting to enable full-screen mode: ${err.message} (${err.name})`);
+                         alert(`Could not enter fullscreen mode: ${err.message}`);
+                     });
+             } else {
+                 if (document.exitFullscreen) {
+                     document.exitFullscreen();
+                 }
+             }
+         }
+
+         document.addEventListener('fullscreenchange', () => {
+             if (!document.fullscreenElement) {
+                 fullscreenBtn.textContent = '⛶'; // Expand symbol
+                 fullscreenBtn.title = 'Enter Fullscreen';
+             } else {
+                 fullscreenBtn.textContent = ' keluar '; // Use text or a different symbol
+                 fullscreenBtn.title = 'Exit Fullscreen';
+             }
+         });
+
+
+        function updateControlsState() {
+             const hasImages = imageFiles.length > 0;
+             const multipleImages = imageFiles.length > 1;
+
+             playPauseBtn.disabled = !hasImages;
+             fullscreenBtn.disabled = !hasImages || currentIndex < 0; // Disable if no image is loaded/displayable
+             // Keep prev/next enabled even for 1 image? No, doesn't make sense. Disable for 0 or 1.
+             prevBtn.disabled = !multipleImages;
+             nextBtn.disabled = !multipleImages;
+
+             // Update play/pause button text/title based on state
+             if (hasImages) {
+                playPauseBtn.textContent = isPlaying ? '❚❚ Pause' : '▶ Play';
+                playPauseBtn.title = isPlaying ? 'Pause Slideshow' : 'Start Slideshow';
+             } else {
+                 playPauseBtn.textContent = '▶ Play';
+                 playPauseBtn.title = 'Start Slideshow';
+                 // Ensure slideshow state is reset if no images
+                 if(isPlaying) stopSlideshow();
+             }
+        }
+
+        // Initial state setup
+        updateControlsState();
+
+    </script>
+
+</body>
+</html>
